@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -19,9 +18,7 @@ class WebViewExtractor(private val context: Context) {
     @SuppressLint("SetJavaScriptEnabled")
     suspend fun extract(embedUrl: String, log: (String) -> Unit): String? = suspendCancellableCoroutine { continuation ->
         
-        // 1. Cria um container para o WebView (necessário para o Turnstile renderizar)
         val container = FrameLayout(context)
-        // Coloca o WebView fora da tela visível, mas com tamanho definido
         container.layoutParams = FrameLayout.LayoutParams(1, 1)
         container.x = -1000f
         container.y = -1000f
@@ -29,19 +26,14 @@ class WebViewExtractor(private val context: Context) {
         val webView = WebView(context)
         container.addView(webView)
         
-        // 2. Adiciona o container à janela atual (sem mostrar pro usuário)
         val rootView = (context as? android.app.Activity)?.window?.decorView as? android.view.ViewGroup
         rootView?.addView(container)
 
         val settings = webView.settings
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
-        settings.loadWithOverviewMode = true
-        settings.useWideViewPort = true
-        // Manter o User-Agent consistente é crucial para o Turnstile [citation:1]
         settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; TECNO KI5k) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 
-        // Habilita cookies (necessário para o Turnstile) [citation:1]
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
@@ -57,7 +49,7 @@ class WebViewExtractor(private val context: Context) {
             }
         }
 
-        // Timeout de 90 segundos (Cloudflare + carregamento do player)
+        // Timeout geral de 90s (se não achar o m3u8, desiste)
         handler.postDelayed({
             if (!resolved) {
                 log("⏰ Timeout de 90s atingido.")
@@ -69,27 +61,34 @@ class WebViewExtractor(private val context: Context) {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                log("📄 Página carregada, tentando clicar no play...")
+                log("📄 Página carregada. Iniciando loop de clique...")
 
-                // 3. Injeção de JavaScript para clicar no botão de play
-                // Tenta uma variedade de seletores comuns em players piratas
+                // Loop de clique: tenta a cada 1s por 20s
                 val js = """
                     (function() {
-                        var selectors = ['#bigPlay', '.jw-bigplay', 'button[aria-label="Play"]', 'video', '.play-button', '[class*="play"]'];
-                        for (var i = 0; i < selectors.length; i++) {
-                            var el = document.querySelector(selectors[i]);
-                            if (el) {
-                                el.click();
-                                return 'clicked: ' + selectors[i];
+                        var attempts = 0;
+                        var maxAttempts = 20;
+                        var interval = setInterval(function() {
+                            attempts++;
+                            var selectors = ['#bigPlay', '.jw-bigplay', 'button[aria-label="Play"]', 'video', '.play-button', '[class*="play"]'];
+                            for (var i = 0; i < selectors.length; i++) {
+                                var el = document.querySelector(selectors[i]);
+                                if (el) {
+                                    el.click();
+                                    console.log('CLICOU: ' + selectors[i]);
+                                    clearInterval(interval);
+                                    return;
+                                }
                             }
-                        }
-                        return 'no button found';
+                            if (attempts >= maxAttempts) {
+                                clearInterval(interval);
+                                console.log('DESISTIU: botão não apareceu');
+                            }
+                        }, 1000);
                     })();
                 """.trimIndent()
 
-                view?.evaluateJavascript(js) { result ->
-                    log("🖱️ Resultado do clique: $result")
-                }
+                view?.evaluateJavascript(js, null)
             }
 
             override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
@@ -104,7 +103,7 @@ class WebViewExtractor(private val context: Context) {
             }
         }
 
-        log("🌐 WebView (anexado) carregando: $embedUrl")
+        log("🌐 WebView carregando: $embedUrl")
         webView.loadUrl(embedUrl)
     }
 }
