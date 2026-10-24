@@ -1,27 +1,14 @@
 package com.alx.test
 
 import android.os.Bundle
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.Spinner
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
@@ -37,16 +24,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var playerView: PlayerView
 
     private var exoPlayer: ExoPlayer? = null
-
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
     private val providers = listOf(
         "WatchPlay",
         "VIP Player",
-        "StreamX (MP4)"
+        "StreamX",
+        "VidSrcRip",
+        "EmbedSu",
+        "SuperFlix (WebView)",
+        "MegaFlix (WebView)",
+        "Pobreflix (WebView)",
+        "VidSrcMe (WebView)"
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,24 +54,11 @@ class MainActivity : AppCompatActivity() {
         tvLogs = findViewById(R.id.tvLogs)
         scrollLogs = findViewById(R.id.scrollLogs)
         playerView = findViewById(R.id.playerView)
-
         val btnTest = findViewById<Button>(R.id.btnTest)
 
-        // Spinner de tipo
-        spinnerType.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            listOf("Filme", "Série")
-        )
+        spinnerType.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Filme", "Série"))
+        spinnerProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, providers)
 
-        // Spinner de provedor
-        spinnerProvider.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            providers
-        )
-
-        // Mostrar/ocultar campos de série
         spinnerType.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
                 layoutSerie.visibility = if (position == 1) android.view.View.VISIBLE else android.view.View.GONE
@@ -89,10 +68,7 @@ class MainActivity : AppCompatActivity() {
 
         btnTest.setOnClickListener {
             val id = etTmdbId.text.toString().trim()
-            if (id.isEmpty()) {
-                Toast.makeText(this, "Digite o TMDB ID", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
+            if (id.isEmpty()) return@setOnClickListener
 
             val isSerie = spinnerType.selectedItemPosition == 1
             val season = etSeason.text.toString().toIntOrNull() ?: 1
@@ -100,19 +76,24 @@ class MainActivity : AppCompatActivity() {
             val provider = providers[spinnerProvider.selectedItemPosition]
 
             tvLogs.text = "Logs...\n"
-
             lifecycleScope.launch {
-                log("🚀 Iniciando: $provider | ID: $id ${if (isSerie) "T${season}E${episode}" else ""}")
+                log("🚀 Iniciando: $provider | ID: $id")
                 try {
                     val m3u8 = when (provider) {
                         "WatchPlay" -> WatchPlayProvider(client).extract(id, isSerie, season, episode, ::log)
-                        "VIP Player" -> VipPlayerProvider(client).extract(id, isSerie, season, episode, ::log)
-                        "StreamX (MP4)" -> StreamXProvider(client).extract(id, isSerie, season, episode, ::log)
+                        "VIP Player" -> VipPlayerProvider(client).extractAuto(id, isSerie, season, episode, ::log)
+                        "StreamX" -> StreamXProvider(client).extractAuto(id, isSerie, season, episode, ::log)
+                        "VidSrcRip" -> VidSrcRipProvider(client).extract(id, isSerie, season, episode, ::log)
+                        "EmbedSu" -> EmbedSuProvider(client).extract(id, isSerie, season, episode, ::log)
+                        "SuperFlix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://superflixonline.lat/filme/$id", ::log)
+                        "MegaFlix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://megaflixonline.sbs/filme/$id", ::log)
+                        "Pobreflix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://filmesbluray.net/filme/$id", ::log)
+                        "VidSrcMe (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://vidsrcme.ru/embed/movie/$id", ::log)
                         else -> null
                     }
 
                     if (m3u8 != null) {
-                        log("✅ URL encontrada: ${m3u8.take(100)}...")
+                        log("✅ URL: ${m3u8.take(80)}...")
                         playVideo(m3u8)
                     } else {
                         log("❌ Nenhuma URL encontrada")

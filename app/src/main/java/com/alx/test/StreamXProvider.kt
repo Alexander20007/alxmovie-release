@@ -7,44 +7,48 @@ import okhttp3.Request
 
 class StreamXProvider(private val client: OkHttpClient) {
 
-    suspend fun extract(
-        id: String,
-        isSerie: Boolean,
-        season: Int,
-        episode: Int,
-        log: (String) -> Unit
-    ): String? = withContext(Dispatchers.IO) {
+    suspend fun extractAuto(id: String, isSerie: Boolean, season: Int, episode: Int, log: (String) -> Unit): String? = withContext(Dispatchers.IO) {
         try {
-            // StreamX usa ID fixo 8277813 + slug
-            // O slug é derivado do título (não temos o título aqui)
-            // Vamos testar com o slug genérico
-            val slug = "teste"
-            val url = "https://streamx.me/8277813/$slug.mp4?$slug"
+            log("🔍 Buscando slug no filmesbluray...")
+            
+            // 1. Busca no TMDB para achar o slug (título formatado)
+            val tmdbUrl = "https://api.themoviedb.org/3/movie/$id?api_key=SUA_CHAVE_TMDB&language=pt-BR"
+            val tmdbReq = Request.Builder().url(tmdbUrl).build()
+            val tmdbRes = client.newCall(tmdbReq).execute()
+            val tmdbJson = tmdbRes.body?.string() ?: "{}"
+            
+            // Extrai o título sem JSON parser complexo
+            val titleMatch = Regex("\"title\"\\s*:\\s*\"([^\"]+)\"").find(tmdbJson)
+            val title = titleMatch?.groupValues?.get(1) ?: "filme"
+            
+            // Formata o slug (igual ao Pobreflix)
+            val slug = title.lowercase()
+                .replace(Regex("[^a-z0-9\\s]"), "")
+                .replace(" ", "-")
+                .trim()
 
-            log("📡 GET $url")
+            log("📡 Slug encontrado: $slug")
 
-            val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+            // 2. Tenta o StreamX com o slug (ID fixo 8277813)
+            val streamxUrl = "https://streamx.me/8277813/filme.mp4?$slug"
+            log("📡 GET $streamxUrl")
+
+            val req = Request.Builder()
+                .url(streamxUrl)
                 .header("Referer", "https://filmesbluray.net/")
                 .header("Range", "bytes=0-")
                 .build()
 
-            val response = client.newCall(request).execute()
-            val contentType = response.header("Content-Type") ?: "?"
+            val res = client.newCall(req).execute()
+            val contentType = res.header("Content-Type") ?: "?"
 
-            log("📥 Status: ${response.code} | Tipo: $contentType")
+            log("📥 Status: ${res.code} | Tipo: $contentType")
 
-            if (response.code == 200 || response.code == 206) {
-                if (contentType.contains("video/mp4")) {
-                    log("✅ MP4 válido encontrado!")
-                    return@withContext url
-                } else {
-                    log("⚠️ Retornou HTML (bloqueado ou slug errado)")
-                    return@withContext null
-                }
+            if ((res.code == 200 || res.code == 206) && contentType.contains("video/mp4")) {
+                log("✅ MP4 válido!")
+                return@withContext streamxUrl
             } else {
-                log("❌ Bloqueado: ${response.code}")
+                log("⚠️ Bloqueado ou slug errado")
                 return@withContext null
             }
         } catch (e: Exception) {
