@@ -85,7 +85,7 @@ class MainActivity : AppCompatActivity() {
                         "StreamX" -> StreamXProvider(client).extractAuto(id, isSerie, season, episode, ::log)
                         "VidSrcRip" -> VidSrcRipProvider(client).extract(id, isSerie, season, episode, ::log)
                         "EmbedSu" -> EmbedSuProvider(client).extract(id, isSerie, season, episode, ::log)
-                        "SuperFlix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://superflixonline.lat/filme/$id", ::log)
+                        "SuperFlix (WebView)" -> SuperFlixProvider(client).extract(id, isSerie, season, episode, ::log)
                         "MegaFlix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://megaflixonline.sbs/filme/$id", ::log)
                         "Pobreflix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://filmesbluray.net/filme/$id", ::log)
                         "VidSrcMe (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://vidsrcme.ru/embed/movie/$id", ::log)

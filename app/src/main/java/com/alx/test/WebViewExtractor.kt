@@ -35,9 +35,6 @@ class WebViewExtractor(private val context: Context) {
         settings.domStorageEnabled = true
         settings.setSupportMultipleWindows(true)
         settings.javaScriptCanOpenWindowsAutomatically = true
-        settings.loadWithOverviewMode = true
-        settings.useWideViewPort = true
-        // User-Agent de celular real pra tentar enganar o Cloudflare
         settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; TECNO KI5k) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 
         CookieManager.getInstance().setAcceptCookie(true)
@@ -55,7 +52,6 @@ class WebViewExtractor(private val context: Context) {
             }
         }
 
-        // Timeout de 90s
         handler.postDelayed({
             if (!resolved) {
                 log("⏰ Timeout de 90s atingido.")
@@ -67,31 +63,28 @@ class WebViewExtractor(private val context: Context) {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                log("📄 Página carregada. Iniciando loop de clique (500ms)...")
-                
-                // Injeção de JS agressiva
+                log("📄 Página carregada. Iniciando clique cirúrgico...")
+
+                // JS pra clicar no botão correto que monta o iframe
                 val js = """
                     (function() {
                         var attempts = 0;
-                        var maxAttempts = 60; // 30 segundos
                         var interval = setInterval(function() {
                             attempts++;
-                            // Procura em todos os frames e tags
-                            var selectors = ['#bigPlay', '.jw-bigplay', 'button[aria-label="Play"]', 'video', '.play-button', '[class*="play"]', '.vjs-big-play-button', 'button'];
-                            for (var i = 0; i < selectors.length; i++) {
-                                var el = document.querySelector(selectors[i]);
-                                if (el) {
-                                    el.click();
-                                    console.log('CLICOU: ' + selectors[i]);
-                                    clearInterval(interval);
-                                    return;
-                                }
-                            }
-                            if (attempts >= maxAttempts) {
+                            // Procura o elemento que tem o atributo data-playback-source
+                            var btn = document.querySelector('[data-playback-source]');
+                            if (btn) {
+                                // O site espera o evento 'click', então vamos disparar ele
+                                btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                                console.log('CLICOU NO BOTAO CORRETO!');
                                 clearInterval(interval);
-                                console.log('DESISTIU: botão não apareceu');
+                                return;
                             }
-                        }, 500);
+                            if (attempts > 30) {
+                                clearInterval(interval);
+                                console.log('DESISTIU: botao data-playback-source nao encontrado');
+                            }
+                        }, 1000);
                     })();
                 """.trimIndent()
 
