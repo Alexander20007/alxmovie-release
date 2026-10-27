@@ -1,0 +1,31 @@
+name: Hospedar Vídeos no DoodStream
+
+on:
+  workflow_dispatch: # Permite rodar manualmente pelo botão no GitHub
+  # schedule:
+  #   - cron: '0 */6 * * *' # Opcional: rodar a cada 6 horas automaticamente
+
+jobs:
+  hospedar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: Rodar o Hospedeiro
+        run: node index.js
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DOOD_API_KEY: ${{ secrets.DOOD_API_KEY }}

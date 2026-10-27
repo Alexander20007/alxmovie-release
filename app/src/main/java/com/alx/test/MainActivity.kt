@@ -9,6 +9,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
@@ -35,8 +37,8 @@ class MainActivity : AppCompatActivity() {
         "StreamX",
         "VidSrcRip",
         "EmbedSu",
+        "Blogger (WebView)",
         "SuperFlix (WebView)",
-        "MegaFlix (WebView)",
         "Pobreflix (WebView)",
         "VidSrcMe (WebView)"
     )
@@ -87,9 +89,8 @@ class MainActivity : AppCompatActivity() {
                         "VIP Player" -> VipPlayerProvider(client).extractAuto(id, isSerie, season, episode, ::log)
                         "StreamX" -> StreamXProvider(client).extractAuto(id, isSerie, season, episode, ::log)
                         "VidSrcRip" -> VidSrcRipProvider(client).extract(id, isSerie, season, episode, ::log)
-                        // Os de WebView chamam o Extractor passando o Context da Activity
+                        "Blogger (WebView)" -> extrairBlogger(id, isSerie, season, episode, ::log)
                         "SuperFlix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://superflixonline.lat/filme/$id", ::log)
-                        "MegaFlix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://megaflixonline.sbs/filme/$id", ::log)
                         "Pobreflix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://filmesbluray.net/filme/$id", ::log)
                         "VidSrcMe (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://vidsrcme.ru/embed/movie/$id", ::log)
                         else -> null
@@ -104,6 +105,64 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     log("❌ Erro: ${e.message}")
                 }
+            }
+        }
+    }
+
+    // Busca o link do Blogger no playerflix e chama o WebView
+    private suspend fun extrairBlogger(
+        id: String,
+        isSerie: Boolean,
+        season: Int,
+        episode: Int,
+        log: (String) -> Unit
+    ): String? {
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val tipo = if (isSerie) "tv" else "movie"
+                val s = if (isSerie) season.toString() else "null"
+                val e = if (isSerie) episode.toString() else "null"
+                val apiUrl = "https://playerflix.ink/inc/Ajax.php?type=$tipo&id=$id&season=$s&episode=$e"
+
+                val request = Request.Builder()
+                    .url(apiUrl)
+                    .header("Referer", "https://playerflix.ink/")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                    .build()
+
+                val response = client.newCall(request).execute()
+                val json = JSONObject(response.body?.string() ?: "{}")
+
+                if (!json.has("status") || !json.getBoolean("status")) {
+                    log("❌ playerflix não retornou status=true")
+                    return@withContext null
+                }
+
+                val options = json.getJSONObject("data").getJSONArray("options")
+                var embedUrl = ""
+
+                for (i in 0 until options.length()) {
+                    val opt = options.getJSONObject(i)
+                    if (opt.getString("label") == "Blogger") {
+                        embedUrl = opt.getString("embed")
+                        break
+                    }
+                }
+
+                if (embedUrl.isEmpty()) {
+                    log("❌ Blogger não encontrado para este ID")
+                    return@withContext null
+                }
+
+                log("🎯 Link do Blogger: ${embedUrl.take(80)}...")
+
+                // Chama o WebView para carregar o link do Blogger e capturar o googlevideo
+                return@withContext WebViewExtractor(this@MainActivity).extract(embedUrl, log)
+
+            } catch (e: Exception) {
+                log("❌ Erro ao buscar Blogger: ${e.message}")
+                return@withContext null
             }
         }
     }
