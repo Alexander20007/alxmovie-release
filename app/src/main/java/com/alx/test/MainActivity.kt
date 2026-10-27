@@ -76,6 +76,9 @@ class MainActivity : AppCompatActivity() {
             val provider = providers[spinnerProvider.selectedItemPosition]
 
             tvLogs.text = "Logs...\n"
+            exoPlayer?.stop()
+            exoPlayer?.clearMediaItems()
+
             lifecycleScope.launch {
                 log("🚀 Iniciando: $provider | ID: $id")
                 try {
@@ -84,8 +87,8 @@ class MainActivity : AppCompatActivity() {
                         "VIP Player" -> VipPlayerProvider(client).extractAuto(id, isSerie, season, episode, ::log)
                         "StreamX" -> StreamXProvider(client).extractAuto(id, isSerie, season, episode, ::log)
                         "VidSrcRip" -> VidSrcRipProvider(client).extract(id, isSerie, season, episode, ::log)
-                        "EmbedSu" -> EmbedSuProvider(client).extract(id, isSerie, season, episode, ::log)
-                        "SuperFlix (WebView)" -> SuperFlixProvider(client).extract(id, isSerie, season, episode, ::log)
+                        // Os de WebView chamam o Extractor passando o Context da Activity
+                        "SuperFlix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://superflixonline.lat/filme/$id", ::log)
                         "MegaFlix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://megaflixonline.sbs/filme/$id", ::log)
                         "Pobreflix (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://filmesbluray.net/filme/$id", ::log)
                         "VidSrcMe (WebView)" -> WebViewExtractor(this@MainActivity).extract("https://vidsrcme.ru/embed/movie/$id", ::log)
