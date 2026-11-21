@@ -1,0 +1,115 @@
+
+name: Extrair ZIP para a raiz
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "*.zip"
+      - "*.ZIP"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract-zip:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clonar repositório
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Extrair ZIP
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+          import shutil
+
+          root = Path.cwd()
+          zips = list(root.glob("*.zip")) + list(root.glob("*.ZIP"))
+
+          if not zips:
+              raise SystemExit("Nenhum ZIP encontrado na raiz.")
+
+          if len(zips) != 1:
+              raise SystemExit("Deixa apenas um ZIP na raiz.")
+
+          archive = zips[0]
+
+          with ZipFile(archive) as zf:
+              entries = []
+
+              for info in zf.infolist():
+                  name = info.filename.replace("\\", "/")
+                  path = PurePosixPath(name)
+
+                  if path.is_absolute() or ".." in path.parts:
+                      raise SystemExit(f"Caminho inseguro: {name}")
+
+                  parts = tuple(
+                      p for p in path.parts if p not in ("", ".")
+                  )
+
+                  if not parts or parts[0] == ".git":
+                      continue
+
+                  entries.append((info, parts))
+
+              files = [
+                  parts for info, parts in entries
+                  if not info.is_dir()
+              ]
+
+              common_root = None
+
+              if files and all(
+                  len(p) > 1 and p[0] == files[0][0]
+                  for p in files
+              ):
+                  common_root = files[0][0]
+
+              for info, parts in entries:
+                  if common_root and parts[0] == common_root:
+                      parts = parts[1:]
+
+                  if not parts:
+                      continue
+
+                  target = root.joinpath(*parts)
+
+                  if info.is_dir():
+                      target.mkdir(parents=True, exist_ok=True)
+                      continue
+
+                  target.parent.mkdir(parents=True, exist_ok=True)
+
+                  with zf.open(info) as src:
+                      with target.open("wb") as dst:
+                          shutil.copyfileobj(src, dst)
+
+          archive.unlink()
+          print("ZIP extraído e removido com sucesso.")
+          PY
+
+      - name: Guardar alterações no GitHub
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Sem alterações."
+          else
+            git commit -m "Extract project ZIP into repository root"
+            git push origin main
+          fi
+          
