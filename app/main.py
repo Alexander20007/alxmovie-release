@@ -334,10 +334,11 @@ def proxy():
         return "Faltando parametro ?url=", 400
 
     try:
+        # 🚀 O SEGREDO DA "ENGANAÇÃO": Forçamos os headers que o servidor exige
         extra_headers = {
-            "User-Agent": USER_AGENT,
-            "Referer": referer,
-            "Origin": referer.rsplit("/", 1)[0] if referer else "https://v2.watchplay.shop",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://v2.watchplay.shop/",  # Forçado para o domínio deles
+            "Origin": "https://v2.watchplay.shop",    # Forçado para o domínio deles
             "Accept": "*/*",
             "Accept-Language": "pt-BR,pt;q=0.9",
             "Sec-Fetch-Dest": "empty",
@@ -345,26 +346,32 @@ def proxy():
             "Sec-Fetch-Site": "cross-site",
         }
 
-        r = http_get(url, extra_headers, timeout=30)
+        r = http_get(url, extra_headers, timeout=20)
         content_type = r.headers.get("Content-Type", "application/octet-stream")
 
+        # Detecta M3U8 pelo CONTEUDO (nao apenas pela URL)
         is_m3u8 = "#EXTM3U" in r.text[:300] or ".m3u8" in url
 
         if is_m3u8:
+            # Host do backend com HTTPS forcado
             host = request.host_url.rstrip("/")
             if "onrender.com" in host and host.startswith("http://"):
                 host = host.replace("http://", "https://")
 
+            # Parse da URL pra resolver paths absolutos
             parsed = urllib.parse.urlparse(url)
             base_dir = url.rsplit("/", 1)[0] if "/" in url else url
 
             def resolver(rel):
+                """Resolve URL conforme spec HLS."""
                 if rel.startswith(("http://", "https://")):
                     return rel
                 if rel.startswith("//"):
                     return f"{parsed.scheme}:{rel}"
                 if rel.startswith("/"):
+                    # Absoluto desde a raiz do dominio
                     return f"{parsed.scheme}://{parsed.netloc}{rel}"
+                # Relativo ao diretorio do arquivo
                 return f"{base_dir}/{rel}"
 
             def proxify(u):
@@ -380,16 +387,19 @@ def proxy():
                     linhas.append(linha)
                     continue
 
+                # Linha com URI="..." (ex: #EXT-X-MEDIA, #EXT-X-MAP)
                 if 'URI="' in linha_stripped:
                     def repl_uri(m):
                         return f'URI="{proxify(resolver(m.group(1)))}"'
                     linhas.append(re.sub(r'URI="([^"]+)"', repl_uri, linha))
                     continue
 
+                # Comentario normal
                 if linha_stripped.startswith("#"):
                     linhas.append(linha)
                     continue
 
+                # URL de segmento ou playlist
                 linhas.append(proxify(resolver(linha_stripped)))
 
             return Response(
@@ -400,16 +410,14 @@ def proxy():
         return Response(r.content, content_type=content_type)
 
     except Exception as e:
-        return jsonify({"erro": str(e)}), 500
+        # Se der erro no Vercel, retornamos um JSON com o motivo exato
+        return jsonify({"erro_proxy": str(e), "url_tentada": url}), 500
 
 
 # ============ NOVO ENDPOINT DE TESTE ============
 
 @app.route("/api/teste-bloqueio")
 def teste_bloqueio():
-    import requests
-    import re
-    
     # 1. Extrai o link novo direto do WatchPlay (sem cache)
     try:
         headers_page = {
