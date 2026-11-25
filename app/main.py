@@ -88,7 +88,7 @@ def buscar_servidores(tipo, id_, season=None, episode=None):
 def extrair_m3u8(embed_url):
     """
     Extrai M3U8 de multiplos servidores:
-    - WatchPlay (v1.watchplay.shop)
+    - WatchPlay (v1.watchplay.shop / v2.watchplay.shop)
     - VIP Player (embedplayer2.xyz / embedplayer1.xyz)
 
     Retorna: (m3u8_url, expires_timestamp)
@@ -130,15 +130,27 @@ def extrair_m3u8(embed_url):
         return m3u8, expires_at
 
     # ============ WATCHPLAY (padrao) ============
+    
+    # CORREÇÃO 1: Força o domínio v2 se o embed vier do v1, 
+    # pois o v1 só redireciona e pode causar bloqueio de Referer.
+    if "v1.watchplay.shop" in embed_url:
+        embed_url = embed_url.replace("v1.watchplay.shop", "v2.watchplay.shop")
+
+    # CORREÇÃO 2: O Referer precisa ser do v2 para não ser barrado pelo Cloudflare
+    referer_watchplay = "https://v2.watchplay.shop/"
+    
     r = http_get(embed_url, {
-        "Referer": f"{playerflix}/",
+        "Referer": referer_watchplay,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     })
 
-    match = re.search(r'url:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', r.text)
+    # CORREÇÃO 3: Regex atualizada. O servidor agora manda barras escapadas (\/\/).
+    # Essa regex pega qualquer coisa entre aspas após "url:"
+    match = re.search(r'url:\s*["\']([^"\']+)["\']', r.text)
     if not match:
         raise Exception("M3U8 nao encontrado no HTML do embed")
 
+    # Limpa as barras invertidas
     m3u8 = match.group(1).replace("\\/", "/")
 
     expires_match = re.search(r'expires=(\d+)', m3u8)
