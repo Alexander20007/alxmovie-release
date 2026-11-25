@@ -11,7 +11,8 @@ import requests
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 
-from app import supabase_client as sb
+# Certifique-se de que o caminho de importação do supabase_client está correto
+from app import supabase_client as sb 
 
 app = Flask(__name__)
 CORS(app)
@@ -28,7 +29,7 @@ BASE_HEADERS = {
     "Accept-Language": "pt-BR,pt;q=0.9",
 }
 
-CACHE_TTL = 600  # 10 minutos
+CACHE_TTL = 15  # Reduzido para 15 segundos para testes
 
 
 # ============ HELPERS ============
@@ -131,12 +132,11 @@ def extrair_m3u8(embed_url):
 
     # ============ WATCHPLAY (padrao) ============
     
-    # CORREÇÃO 1: Força o domínio v2 se o embed vier do v1, 
-    # pois o v1 só redireciona e pode causar bloqueio de Referer.
+    # Força o domínio v2 se o embed vier do v1
     if "v1.watchplay.shop" in embed_url:
         embed_url = embed_url.replace("v1.watchplay.shop", "v2.watchplay.shop")
-
-    # CORREÇÃO 2: O Referer precisa ser do v2 para não ser barrado pelo Cloudflare
+    
+    # O Referer agora precisa ser do v2 para não ser bloqueado
     referer_watchplay = "https://v2.watchplay.shop/"
     
     r = http_get(embed_url, {
@@ -144,8 +144,7 @@ def extrair_m3u8(embed_url):
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     })
 
-    # CORREÇÃO 3: Regex atualizada. O servidor agora manda barras escapadas (\/\/).
-    # Essa regex pega qualquer coisa entre aspas após "url:"
+    # Regex atualizada para capturar a URL com escapes (\/\/)
     match = re.search(r'url:\s*["\']([^"\']+)["\']', r.text)
     if not match:
         raise Exception("M3U8 nao encontrado no HTML do embed")
@@ -173,6 +172,7 @@ def home():
             "GET /api/servers/movie/<id>                -> lista servidores filme",
             "GET /api/servers/tv/<id>/<s>/<e>           -> lista servidores serie",
             "GET /api/proxy?url=...                      -> proxy de segmentos",
+            "GET /api/teste-bloqueio                     -> teste de bloqueio de IP",
         ]
     })
 
@@ -313,8 +313,7 @@ def _extrair_stream(tipo, id_, season=None, episode=None):
         ttl_final = CACHE_TTL
         if expires_at:
             segundos_restantes = expires_at - int(time.time())
-            ttl_final = max(60, min(CACHE_TTL, segundos_restantes - 60))
-            print(f"[INFO] TTL ajustado: {ttl_final}s")
+            ttl_final = max(5, min(CACHE_TTL, segundos_restantes - 60)) # min de 5s
 
         try:
             sb.cache_set(cache_key, resultado, ttl_seconds=ttl_final)
@@ -336,6 +335,7 @@ def proxy():
 
     try:
         extra_headers = {
+            "User-Agent": USER_AGENT,
             "Referer": referer,
             "Origin": referer.rsplit("/", 1)[0] if referer else "https://v2.watchplay.shop",
             "Accept": "*/*",
@@ -348,29 +348,23 @@ def proxy():
         r = http_get(url, extra_headers, timeout=30)
         content_type = r.headers.get("Content-Type", "application/octet-stream")
 
-        # Detecta M3U8 pelo CONTEUDO (nao apenas pela URL)
         is_m3u8 = "#EXTM3U" in r.text[:300] or ".m3u8" in url
 
         if is_m3u8:
-            # Host do backend com HTTPS forcado
             host = request.host_url.rstrip("/")
             if "onrender.com" in host and host.startswith("http://"):
                 host = host.replace("http://", "https://")
 
-            # Parse da URL pra resolver paths absolutos
             parsed = urllib.parse.urlparse(url)
             base_dir = url.rsplit("/", 1)[0] if "/" in url else url
 
             def resolver(rel):
-                """Resolve URL conforme spec HLS."""
                 if rel.startswith(("http://", "https://")):
                     return rel
                 if rel.startswith("//"):
                     return f"{parsed.scheme}:{rel}"
                 if rel.startswith("/"):
-                    # Absoluto desde a raiz do dominio
                     return f"{parsed.scheme}://{parsed.netloc}{rel}"
-                # Relativo ao diretorio do arquivo
                 return f"{base_dir}/{rel}"
 
             def proxify(u):
@@ -386,19 +380,16 @@ def proxy():
                     linhas.append(linha)
                     continue
 
-                # Linha com URI="..." (ex: #EXT-X-MEDIA, #EXT-X-MAP)
                 if 'URI="' in linha_stripped:
                     def repl_uri(m):
                         return f'URI="{proxify(resolver(m.group(1)))}"'
                     linhas.append(re.sub(r'URI="([^"]+)"', repl_uri, linha))
                     continue
 
-                # Comentario normal
                 if linha_stripped.startswith("#"):
                     linhas.append(linha)
                     continue
 
-                # URL de segmento ou playlist
                 linhas.append(proxify(resolver(linha_stripped)))
 
             return Response(
@@ -408,6 +399,47 @@ def proxy():
 
         return Response(r.content, content_type=content_type)
 
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+
+# ============ NOVO ENDPOINT DE TESTE ============
+
+@app.route("/api/teste-bloqueio")
+def teste_bloqueio():
+    import requests
+    import re
+    
+    # 1. Extrai o link novo direto do WatchPlay (sem cache)
+    try:
+        headers_page = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://v2.watchplay.shop/'
+        }
+        r_page = requests.get('https://v2.watchplay.shop/movie/550', headers=headers_page, timeout=10)
+        m = re.search(r'url:\s*["\']([^"\']+)["\']', r_page.text)
+        
+        if not m:
+            return jsonify({"erro": "Não achou o M3U8 no HTML"}), 500
+            
+        m3u8_url = m.group(1).replace('\\/', '/')
+        
+        # 2. Tenta baixar o M3U8 usando o IP do Vercel
+        headers_video = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://v2.watchplay.shop/',
+            'Origin': 'https://v2.watchplay.shop'
+        }
+        
+        r_video = requests.get(m3u8_url, headers=headers_video, timeout=10)
+        
+        return jsonify({
+            "link_extraido": m3u8_url,
+            "status_do_video": r_video.status_code,
+            "motivo": "Se status 403, o Vercel está bloqueado pelo Cloudflare. Se status 200, o link está acessível.",
+            "preview_resposta": r_video.text[:200] if r_video.status_code != 200 else "OK"
+        })
+        
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
